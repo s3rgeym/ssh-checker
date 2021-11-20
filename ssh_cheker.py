@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""SSH Checker"""
+"""
+ ____ ____  _   _    ____ _     _____      _
+/ ___/ ___|| | | |  / ___| |__ |___ /  ___| | _____ _ __
+\___ \___ \| |_| | | |   | '_ \  |_ \ / __| |/ / _ \ '__|
+ ___) |__) |  _  | | |___| | | |___) | (__|   <  __/ |
+|____/____/|_| |_|  \____|_| |_|____/ \___|_|\_\___|_|
+"""
 import argparse
 import csv
 import json
@@ -9,6 +15,8 @@ from enum import Enum
 from multiprocessing import JoinableQueue, Process, cpu_count
 from subprocess import DEVNULL, Popen
 from urllib.parse import _splitport
+
+__version__ = '0.1.0'
 
 
 # =============================================================================
@@ -111,28 +119,40 @@ def worker(q, timeout):
             # output(f'queue size:\t{q.qsize()}', clear=True, newline=False)
 
 
+class ArgumentFormatter(
+    argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
+):
+    pass
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=ArgumentFormatter,
+    )
     parser.add_argument(
         '-i',
         '--input',
         default='data.csv',
-        help='row format: user, password, hostname[:port]',
+        help='ssh credentials. fields: user, password, hostname[:port]',
         type=argparse.FileType('r'),
     )
     parser.add_argument(
         '-t',
         '--timeout',
-        help='connect timeout (default: %(default)s)',
+        help='connect timeout',
         default=10,
         type=int,
     )
     parser.add_argument(
         '-p',
         '--parallel',
-        help='number of parallel processes (default: %(default)s)',
+        help='number of parallel processes',
         default=cpu_count() * 2,
         type=int,
+    )
+    parser.add_argument(
+        '-v', '--version', action='version', version=f'%(prog)s {__version__}'
     )
     args = parser.parse_args()
 
