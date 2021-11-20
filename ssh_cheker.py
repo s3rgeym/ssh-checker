@@ -18,6 +18,23 @@ from urllib.parse import _splitport
 
 __version__ = '0.1.0'
 
+LF = '\n'
+
+
+class ProgressBar:
+    def __init__(self, q, bars=20):
+        self._q = q
+        self._total = q.qsize()
+        self._bars = bars
+
+    def render(self):
+        n = math.ceil(
+            (self._total - self._q.qsize()) / self._total * self._bars
+        )
+        return '█' * n + '░' * (self._bars - n)
+
+    __str__ = render
+
 
 # =============================================================================
 # Форматирование
@@ -50,22 +67,25 @@ def output(
     message,
     color='primary',
     *,
-    clear=False,
+    append_lf=True,
+    clear=True,
     flush=True,
-    newline=True,
+    prepend_lf=False,
     stderr=False,
 ):
-    file = sys.stderr if stderr else sys.stdout
+    stream = sys.stderr if stderr else sys.stdout
+    if prepend_lf:
+        stream.write(LF)
     # форматирование используем только при выводе в терминал
-    if file.isatty():
+    if stream.isatty():
         if clear:
-            file.write(Formatting.CLEAR.value)
+            stream.write(Formatting.CLEAR.value)
         message = colored(message, color)
-    file.write(message)
-    if newline:
-        file.write('\n')
+    stream.write(message)
+    if append_lf:
+        stream.write(LF)
     if flush:
-        file.flush()
+        stream.flush()
 
 
 # =============================================================================
@@ -97,26 +117,26 @@ def check_ssh(username, password, hostname, timeout=10):
     return p.returncode
 
 
-def worker(q, timeout):
+def worker(q, pb, timeout):
     while not q.empty():
         try:
             username, password, hostname = row = q.get()
             # 5 - неверные логин и/или пароль
             # 255 - порт закрыт
-            code = check_ssh(username, password, hostname, timeout)
-            assert code == 0, f"unexpected code: {code}"
-            output(
-                json.dumps(
-                    dict(zip(('username', 'password', 'hostname'), row)),
-                    ensure_ascii=False,
-                ),
-                'success',
-            )
+            rc = check_ssh(username, password, hostname, timeout)
+            if 0 == rc:
+                output(
+                    json.dumps(
+                        dict(zip(('username', 'password', 'hostname'), row)),
+                        ensure_ascii=False,
+                    ),
+                    'success',
+                )
         except Exception as e:
             output(f"[!] {e}", 'error', stderr=True)
         finally:
             q.task_done()
-            # output(f'queue size:\t{q.qsize()}', clear=True, newline=False)
+            output(str(pb), append_lf=False, stderr=True)
 
 
 class ArgumentFormatter(
@@ -148,7 +168,7 @@ def main():
         '-p',
         '--parallel',
         help='number of parallel processes',
-        default=cpu_count() * 2,
+        default=cpu_count(),
         type=int,
     )
     parser.add_argument(
@@ -159,10 +179,10 @@ def main():
     q = JoinableQueue()
     for row in csv.reader(args.input):
         q.put_nowait(row)
-
+    pb = ProgressBar(q)
     workers = []
     for _ in range(min(args.parallel, q.qsize())):
-        p = Process(target=worker, args=(q, args.timeout))
+        p = Process(target=worker, args=(q, pb, args.timeout))
         p.start()
         workers.append(p)
 
