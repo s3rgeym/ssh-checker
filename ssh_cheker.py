@@ -2,6 +2,7 @@
 """SSH Checker"""
 import argparse
 import csv
+import json
 import math
 import sys
 from enum import Enum
@@ -48,10 +49,10 @@ def output(
 ):
     file = sys.stderr if stderr else sys.stdout
     # форматирование используем только при выводе в терминал
-    # if sys.stdout.isatty():
-    if clear:
-        file.write(Formatting.CLEAR.value)
-    message = colored(message, color)
+    if file.isatty():
+        if clear:
+            file.write(Formatting.CLEAR.value)
+        message = colored(message, color)
     file.write(message)
     if newline:
         file.write('\n')
@@ -91,17 +92,20 @@ def check_ssh(username, password, hostname, timeout=10):
 def worker(q, timeout):
     while not q.empty():
         try:
-            username, password, hostname = q.get()
+            username, password, hostname = row = q.get()
             # 5 - неверные логин и/или пароль
             # 255 - порт закрыт
             code = check_ssh(username, password, hostname, timeout)
-            if code == 0:
-                output(
-                    f"[OK]\t{username!r}\t{password!r}\t{hostname!r}",
-                    'success',
-                )
+            assert code == 0, f"unexpected code: {code}"
+            output(
+                json.dumps(
+                    dict(zip(('username', 'password', 'hostname'), row)),
+                    ensure_ascii=False,
+                ),
+                'success',
+            )
         except Exception as e:
-            output(f"err: {e}", 'error')
+            output(f"[!] {e}", 'error', stderr=True)
         finally:
             q.task_done()
             # output(f'queue size:\t{q.qsize()}', clear=True, newline=False)
@@ -112,8 +116,8 @@ def main():
     parser.add_argument(
         '-i',
         '--input',
-        default='data.scv',
-        help='format: user,password,hostname[:port]<NL>',
+        default='data.csv',
+        help='row format: user, password, hostname[:port]',
         type=argparse.FileType('r'),
     )
     parser.add_argument(
@@ -125,7 +129,7 @@ def main():
     )
     parser.add_argument(
         '-p',
-        '--processes',
+        '--parallel',
         help='number of parallel processes (default: %(default)s)',
         default=cpu_count() * 2,
         type=int,
@@ -133,11 +137,11 @@ def main():
     args = parser.parse_args()
 
     q = JoinableQueue()
-    for username, password, hostname in csv.reader(args.input):
-        q.put_nowait((username, password, hostname))
+    for row in csv.reader(args.input):
+        q.put_nowait(row)
 
     workers = []
-    for _ in range(min(args.processes, q.qsize())):
+    for _ in range(min(args.parallel, q.qsize())):
         p = Process(target=worker, args=(q, args.timeout))
         p.start()
         workers.append(p)
