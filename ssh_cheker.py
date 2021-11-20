@@ -27,13 +27,13 @@ class ProgressBar:
         self._total = q.qsize()
         self._bars = bars
 
-    def render(self):
-        n = math.ceil(
+    def output(self):
+        n = math.floor(
             (self._total - self._q.qsize()) / self._total * self._bars
         )
         return '█' * n + '░' * (self._bars - n)
 
-    __str__ = render
+    __str__ = output
 
 
 # =============================================================================
