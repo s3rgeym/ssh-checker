@@ -145,14 +145,14 @@ def main():
         '-i',
         '--input',
         default=sys.stdin,
-        help='SSH credentials csv file. Fields: user, password, hostname[:port]. Default: stdin',
+        help='SSH credentials csv file. Fields: user, password, hostname[:port]. Default: <STDIN>',
         type=argparse.FileType('r'),
     )
     parser.add_argument(
         '-o',
         '--output',
         default=sys.stdout,
-        help='Valid SSH credentials csv file. Default: stdout',
+        help='Valid SSH credentials csv file. Default: <STDOUT>',
         type=argparse.FileType('w'),
     )
     parser.add_argument(
@@ -178,8 +178,8 @@ def main():
     for row in csv.reader(args.input):
         in_q.put_nowait(row)
 
-    result_q = Queue()
     total_tasks = in_q.qsize()
+    result_q = Queue()
 
     workers = []
     for _ in range(min(args.parallel, total_tasks)):
