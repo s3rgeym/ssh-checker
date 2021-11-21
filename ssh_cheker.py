@@ -64,7 +64,7 @@ def console_progress(value, total):
 
 def check_ssh(username, password, hostname, timeout=10):
     host, port = _splitport(hostname)
-    cmd = [
+    cmd_args = [
         'sshpass',
         '-p',
         password,
@@ -83,7 +83,7 @@ def check_ssh(username, password, hostname, timeout=10):
         f'{username}@{host}',
     ]
     # stdin=DEVNULL чтобы предотвратить ожидание ввода
-    p = Popen(cmd, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL)
+    p = Popen(cmd_args, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL)
     p.communicate()
     return p.returncode
 
@@ -145,14 +145,14 @@ def main():
         '-i',
         '--input',
         default=sys.stdin,
-        help='SSH credentials csv file. Fields: user, password, hostname[:port]. Default: <STDIN>',
+        help='SSH credentials in CSV format. Fields: user, password, hostname[:port]. Default: <STDIN>',
         type=argparse.FileType('r'),
     )
     parser.add_argument(
         '-o',
         '--output',
         default=sys.stdout,
-        help='Valid SSH credentials csv file. Default: <STDOUT>',
+        help='Valid SSH credentials in CSV format. Default: <STDOUT>',
         type=argparse.FileType('w'),
     )
     parser.add_argument(
