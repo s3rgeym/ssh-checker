@@ -6,90 +6,49 @@
  ___) |__) |  _  | | |___| | | |___) | (__|   <  __/ |
 |____/____/|_| |_|  \____|_| |_|____/ \___|_|\_\___|_|
 """
-# TODO: прогресс должен быть в отдельном процессе?
 import argparse
 import csv
 import json
 import math
 import sys
 from enum import Enum
-from multiprocessing import JoinableQueue, Process, cpu_count
+from multiprocessing import JoinableQueue, Process, Queue, Value, cpu_count
 from subprocess import DEVNULL, Popen
 from urllib.parse import _splitport
 
 __version__ = '0.1.0'
 
-LF = '\n'
+PROGRESS_BAR_WIDTH = 20
 
 
-class ProgressBar:
-    def __init__(self, q, bars=20):
-        self._q = q
-        self._total = q.qsize()
-        self._bars = bars
-
-    def output(self):
-        n = math.floor(
-            (self._total - self._q.qsize()) / self._total * self._bars
-        )
-        return '█' * n + '░' * (self._bars - n)
-
-    __str__ = output
+color_map = {
+    'black': 30,
+    'red': 31,
+    'green': 32,
+    'yellow': 33,
+    'blue': 34,
+    'purple': 35,
+    'cyan': 36,
+    'white': 37,
+}
 
 
-# =============================================================================
-# Форматирование
-# =============================================================================
-class Formatting(Enum):
-    CLEAR = '\r\033[0K'
-    END = '\033[0m'
-
-
-class Color(Enum):
-    BLACK = '\033[0;30m'
-    RED = '\033[0;31m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[0;33m'
-    BLUE = '\033[0;34m'
-    PURPLE = '\033[0;35m'
-    CYAN = '\033[0;36m'
-    WHITE = '\033[0;37m'
-    PRIMARY = BLUE
-    SUCCESS = GREEN
-    ERROR = RED
-
-
-def colored(s, color):
-    color = Color[color.upper()] if isinstance(color, str) else color
-    return f'{color.value}{s}{Formatting.END.value}'
+def colorize(color: str, text: str) -> str:
+    return f'\033[0;{color_map[color]}m{text}\033[0m'
 
 
 def output(
-    message,
-    color='primary',
-    *,
-    append_lf=True,
-    clear=True,
-    flush=True,
-    prepend_lf=False,
-    stderr=False,
-):
-    stream = sys.stderr if stderr else sys.stdout
-    if prepend_lf:
-        stream.write(LF)
+    text: str, color: str = 'blue', *, stream=sys.stdout, newline=True
+) -> None:
     # форматирование используем только при выводе в терминал
     if stream.isatty():
-        if clear:
-            stream.write(Formatting.CLEAR.value)
-        message = colored(message, color)
-    stream.write(message)
-    if append_lf:
-        stream.write(LF)
-    if flush:
-        stream.flush()
-
-
-# =============================================================================
+        # перемещаем курсор в начало строки и очищаем строку
+        stream.write('\r\033[0K')
+        text = colorize(color, text)
+    stream.write(text)
+    if newline:
+        stream.write('\n')
+    stream.flush()
 
 
 def check_ssh(username, password, hostname, timeout=10):
@@ -118,26 +77,54 @@ def check_ssh(username, password, hostname, timeout=10):
     return p.returncode
 
 
-def worker(q, pb, timeout):
+def worker(q, result_q, tasks_done, timeout):
     while not q.empty():
         try:
-            username, password, hostname = row = q.get()
+            username, password, hostname = q.get()
             # 5 - неверные логин и/или пароль
             # 255 - порт закрыт
-            rc = check_ssh(username, password, hostname, timeout)
-            if 0 == rc:
-                output(
-                    json.dumps(
-                        dict(zip(('username', 'password', 'hostname'), row)),
-                        ensure_ascii=False,
-                    ),
-                    'success',
+            retcode = check_ssh(username, password, hostname, timeout)
+            if retcode == 0:
+                result_q.put_nowait(
+                    {
+                        'type': 'success',
+                        'details': dict(
+                            username=username,
+                            password=password,
+                            hostname=hostname,
+                        ),
+                    }
                 )
         except Exception as e:
-            output(f"[!] {e}", 'error', stderr=True)
+            result_q.put_nowait({'type': 'error', 'message': str(e)})
         finally:
             q.task_done()
-            output(str(pb), append_lf=False, stderr=True)
+            tasks_done.value += 1
+            result_q.put_nowait({'type': 'task_done'})
+
+
+def output_results(q, total_tasks, tasks_done):
+    while True:
+        result = q.get()
+        if result is None:
+            break
+        if result['type'] == 'success':
+            output(json.dumps(result['details'], ensure_ascii=False), 'green')
+        elif result['type'] == 'error':
+            output(result['message'], 'red', stream=sys.stderr)
+        elif result['type'] == 'task_done':
+            progress = math.floor(
+                tasks_done.value / total_tasks * PROGRESS_BAR_WIDTH
+            )
+            output(
+                'Progress: '
+                + '█' * progress
+                + '░' * (PROGRESS_BAR_WIDTH - progress),
+                stream=sys.stderr,
+                newline=False,
+            )
+        else:
+            raise ValueError(result['type'])
 
 
 class ArgumentFormatter(
@@ -180,16 +167,29 @@ def main():
     q = JoinableQueue()
     for row in csv.reader(args.input):
         q.put_nowait(row)
-    pb = ProgressBar(q)
+
+    result_q = Queue()
+    total_tasks = q.qsize()
+    tasks_done = Value('i', 0)
+
     workers = []
-    for _ in range(min(args.parallel, q.qsize())):
-        p = Process(target=worker, args=(q, pb, args.timeout))
+    for _ in range(min(args.parallel, total_tasks)):
+        p = Process(target=worker, args=(q, result_q, tasks_done, args.timeout))
         p.start()
         workers.append(p)
 
+    output_p = Process(
+        target=output_results, args=(result_q, total_tasks, tasks_done)
+    )
+    output_p.start()
+
     q.join()
+
     for w in workers:
         w.join()
+
+    result_q.put_nowait(None)
+    output_p.join()
 
 
 if __name__ == '__main__':
