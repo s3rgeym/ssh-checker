@@ -2,17 +2,19 @@
 
 SSH Account Checker.
 
-![image](https://user-images.githubusercontent.com/12753171/142746772-078a52cd-d49c-4d60-a0b4-aa5d1990844e.png)
-
 ```bash
-# see
+# basic usage
+$ ./ssh_cheker.py -i data.csv > valid.csv
+
+# see help
 $ ./ssh_cheker.py -h
 ```
 
 ## Features
 
-- no python dependencies
+- no python package dependencies
 - multiprocessing
+- colored output with progress bar
 
 ## System Requirements
 
