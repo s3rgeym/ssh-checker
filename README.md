@@ -3,11 +3,7 @@
 SSH Account Checker. 
 
 ```bash
-$ ./ssh_cheker.py accs.csv
-```
-
-```csv
-"admin","admin123","hostname.tld:1234"
+$ ./ssh_cheker.py -h
 ```
 
 ## Features
