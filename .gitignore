@@ -129,5 +129,6 @@ dmypy.json
 .pyre/
 
 /data.csv
+/result.csv
 /output.txt
 /q.py

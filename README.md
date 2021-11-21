@@ -1,9 +1,9 @@
 # SSH Checker
 
-SSH Account Checker. 
+SSH Account Checker.
 
 ```bash
-$ ./ssh_cheker.py accs.csv -o valid.csv
+$ ./ssh_cheker.py -i accs.csv
 
 # see
 $ ./ssh_cheker.py -h
