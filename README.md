@@ -3,7 +3,7 @@
 SSH Account Checker. 
 
 ```bash
-# ./ssh_cheker.py accs.csv -o valid.csv
+$ ./ssh_cheker.py accs.csv -o valid.csv
 
 # see
 $ ./ssh_cheker.py -h
