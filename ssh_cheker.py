@@ -125,7 +125,7 @@ def output_results(result_q, output, total_tasks):
             console_success(
                 f"[VALID] {details['username']}@{details['hostname']}"
             )
-            writer.writerow(result['details'].values())
+            writer.writerow(details.values())
             output.flush()
         elif result['type'] == 'error':
             console_error(f"[ERROR] {result['message']}")
