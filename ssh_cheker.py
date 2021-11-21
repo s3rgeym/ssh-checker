@@ -165,7 +165,7 @@ def main():
     parser.add_argument(
         '-p',
         '--parallel',
-        help='Number of parallel processes. Default: number of processors * 2',
+        help='Number of parallel processes. Default: number_of_processors * 2',
         default=cpu_count() * 2,
         type=int,
     )
