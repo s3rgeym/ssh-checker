@@ -8,7 +8,6 @@
 """
 import argparse
 import csv
-import math
 import sys
 from functools import partial
 from multiprocessing import JoinableQueue, Process, Queue, cpu_count
@@ -17,7 +16,7 @@ from urllib.parse import _splitport
 
 __version__ = '0.1.0'
 
-PROGRESS_BAR_WIDTH = 20
+PROGRESS_WIDTH = 20
 
 
 color_map = {
@@ -32,24 +31,35 @@ color_map = {
 }
 
 
-def colorize(color: str, text: str) -> str:
+def colorize(text, color):
     return f'\033[0;{color_map[color]}m{text}\033[0m'
 
 
-def print_colored(text: str, color: str = 'blue', *, newline=True) -> None:
+def console_write(text: str, color: str = 'blue', *, newline=True):
     # форматирование используем только при выводе в терминал
-    if sys.stderr.isatty():
-        # перемещаем курсор в начало строки и очищаем строку
-        sys.stderr.write('\r\033[0K')
-        text = colorize(color, text)
-    sys.stderr.write(text)
+    # if sys.stderr.isatty():
+    #     ...
+    # перемещаем курсор в начало строки и очищаем строку
+    sys.stderr.write('\r\033[0K')
+    colored = colorize(text, color)
+    sys.stderr.write(colored)
     if newline:
         sys.stderr.write('\n')
     sys.stderr.flush()
 
 
-print_success = partial(print_colored, color='green')
-print_error = partial(print_colored, color='red')
+console_success = partial(console_write, color='green')
+console_error = partial(console_write, color='red')
+
+
+def console_progress(value, total):
+    ratio = value / total
+    percentage = round(ratio * 100)
+    value_width = round(ratio * PROGRESS_WIDTH)
+    progress_indicator = '█' * value_width + '░' * (
+        PROGRESS_WIDTH - value_width
+    )
+    console_write(f'{progress_indicator} {percentage}%', newline=False)
 
 
 def check_ssh(username, password, hostname, timeout=10):
@@ -78,15 +88,15 @@ def check_ssh(username, password, hostname, timeout=10):
     return p.returncode
 
 
-def worker(in_queue, result_queue, timeout):
-    while not in_queue.empty():
+def worker(in_q, result_q, timeout):
+    while not in_q.empty():
         try:
-            username, password, hostname = in_queue.get()
+            username, password, hostname = in_q.get()
             # 5 - неверные логин и/или пароль
             # 255 - порт закрыт
             retcode = check_ssh(username, password, hostname, timeout)
             if retcode == 0:
-                result_queue.put_nowait(
+                result_q.put_nowait(
                     {
                         'type': 'success',
                         'details': dict(
@@ -97,79 +107,66 @@ def worker(in_queue, result_queue, timeout):
                     }
                 )
         except Exception as e:
-            result_queue.put_nowait({'type': 'error', 'message': str(e)})
+            result_q.put_nowait({'type': 'error', 'message': str(e)})
         finally:
-            in_queue.task_done()
-            result_queue.put_nowait({'type': 'task_done'})
+            in_q.task_done()
+            result_q.put_nowait({'type': 'task_done'})
 
 
-def process_results(result_queue, output, total_tasks):
+def output_results(result_q, output, total_tasks):
     writer = csv.writer(output)
     tasks_done = 0
     while True:
-        result = result_queue.get()
+        result = result_q.get()
         if result is None:
             break
         if result['type'] == 'success':
-            print_success(
-                '[+] '
-                + ', '.join(f'{k}={v!r}' for k, v in result['details'].items())
+            details = result['details']
+            console_success(
+                f"[VALID] {details['username']}@{details['hostname']}"
             )
             writer.writerow(result['details'].values())
             output.flush()
         elif result['type'] == 'error':
-            print_error('[!] ' + result['message'])
+            console_error(f"[ERROR] {result['message']}")
         elif result['type'] == 'task_done':
             tasks_done += 1
-            progress = math.floor(tasks_done / total_tasks * PROGRESS_BAR_WIDTH)
-            print_colored(
-                'Progress: '
-                + '█' * progress
-                + '░' * (PROGRESS_BAR_WIDTH - progress),
-                newline=False,
-            )
+            console_progress(tasks_done, total_tasks)
         else:
             raise ValueError(result['type'])
-    output.close()
-
-
-class ArgumentFormatter(
-    argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
-):
-    pass
 
 
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
-        formatter_class=ArgumentFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         '-i',
         '--input',
-        default='data.csv',
-        help='ssh credentials. fields: user, password, hostname[:port]',
+        default=sys.stdin,
+        help='SSH credentials csv file. Fields: user, password, hostname[:port]. Default: stdin',
         type=argparse.FileType('r'),
     )
     parser.add_argument(
         '-o',
         '--output',
-        default='valid.csv',
-        help='valid ssh credentials',
+        default=sys.stdout,
+        help='Valid SSH credentials csv file. Default: stdout',
         type=argparse.FileType('w'),
     )
     parser.add_argument(
         '-t',
         '--timeout',
-        help='connect timeout',
+        help='Connect timeout. Default: %(default)s',
         default=10,
         type=int,
     )
     parser.add_argument(
         '-p',
         '--parallel',
-        help='number of parallel processes',
-        default=cpu_count(),
+        help='Number of parallel processes. Default: number of processors * 2',
+        default=cpu_count() * 2,
         type=int,
     )
     parser.add_argument(
@@ -177,34 +174,34 @@ def main():
     )
     args = parser.parse_args()
 
-    in_queue = JoinableQueue()
+    in_q = JoinableQueue()
     for row in csv.reader(args.input):
-        in_queue.put_nowait(row)
+        in_q.put_nowait(row)
 
-    result_queue = Queue()
-    total_tasks = in_queue.qsize()
+    result_q = Queue()
+    total_tasks = in_q.qsize()
 
     workers = []
     for _ in range(min(args.parallel, total_tasks)):
         p = Process(
             target=worker,
-            args=(in_queue, result_queue, args.timeout),
+            args=(in_q, result_q, args.timeout),
         )
         p.start()
         workers.append(p)
 
-    result_processor = Process(
-        target=process_results, args=(result_queue, args.output, total_tasks)
+    output_p = Process(
+        target=output_results, args=(result_q, args.output, total_tasks)
     )
-    result_processor.start()
+    output_p.start()
 
-    in_queue.join()
+    in_q.join()
 
     for w in workers:
         w.join()
 
-    result_queue.put_nowait(None)
-    result_processor.join()
+    result_q.put_nowait(None)
+    output_p.join()
 
 
 if __name__ == '__main__':

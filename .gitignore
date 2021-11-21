@@ -132,3 +132,4 @@ dmypy.json
 /result.csv
 /output.txt
 /q.py
+/ssh_checker_min.py
