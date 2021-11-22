@@ -9,10 +9,14 @@
 import argparse
 import csv
 import sys
+import warnings
 from functools import partial
 from multiprocessing import JoinableQueue, Process, Queue, cpu_count
 from subprocess import DEVNULL, Popen
-from urllib.parse import _splitport
+from urllib.parse import splitport
+
+# splitport deprecated warning
+warnings.filterwarnings('ignore')
 
 __version__ = '0.1.0'
 
@@ -63,7 +67,7 @@ def console_progress(value, total):
 
 
 def check_ssh(username, password, hostname, timeout=10):
-    host, port = _splitport(hostname)
+    host, port = splitport(hostname)
     cmd_args = [
         'sshpass',
         '-p',
